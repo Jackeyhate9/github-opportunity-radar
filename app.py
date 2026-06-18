@@ -296,6 +296,11 @@ def cmd_smoke_test(args=None):
         "src.daily_watchlist", "src.daily_report", "src.validation_pack",
         "src.mvp_brief_generator",
         "src.experiment_tracker",
+        # Forecast v0.5
+        "src.forecast.models", "src.forecast.adapter",
+        "src.forecast.baseline", "src.forecast.features",
+        "src.forecast.database", "src.forecast.service",
+        "src.forecast.demo_fixture", "src.forecast.cli",
     ]
     for mod in modules:
         try:
@@ -558,6 +563,56 @@ def cmd_smoke_test(args=None):
     except Exception as e:
         import traceback
         errors.append(f"Experiment tracker test: {e}\n{traceback.format_exc()}")
+
+    # Forecast v0.5 smoke tests
+    try:
+        from src.forecast.baseline import BaselineForecastAdapter
+        from src.forecast.models import SeriesBatch
+        from src.forecast.features import compute_forecast_features, compute_forecast_signal
+        from src.forecast.database import init_forecast_tables, get_historical_metrics
+        import sqlite3
+
+        adapter = BaselineForecastAdapter()
+        batch = SeriesBatch("repo", "test/smoke", "stars_count",
+                            ["2026-01-01", "2026-01-02", "2026-01-03"],
+                            [100.0, 105.0, 110.0])
+        results = adapter.forecast([batch], horizon=14)
+        assert len(results) == 1, "baseline forecast failed"
+        r = results[0]
+        assert len(r.point_forecast) == 14, f"expected 14 points, got {len(r.point_forecast)}"
+        assert r.trend_confidence > 0, "confidence should be > 0"
+        features = compute_forecast_features([batch], results)
+        signal = compute_forecast_signal(features)
+        assert 0 <= signal.forecast_signal_score <= 100, "signal score out of range"
+
+        init_forecast_tables()
+        conn_f = sqlite3.connect(str(settings.db_path))
+        conn_f.row_factory = sqlite3.Row
+        tables_f = {r["name"] for r in conn_f.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()}
+        conn_f.close()
+        assert "historical_metrics" in tables_f, "historical_metrics table missing"
+        assert "metric_forecasts" in tables_f, "metric_forecasts table missing"
+
+        from src.forecast.timesfm_adapter import TimesFMAdapter
+        tfa = TimesFMAdapter()
+        tfa.fit_or_prepare([])
+        assert tfa._loaded, "TimesFMAdapter should load (even if no model)"
+
+        from src.forecast.demo_fixture import generate_demo_data
+        from src.forecast.service import ForecastService
+        svc = ForecastService()
+        demos = generate_demo_data(svc)
+        assert len(demos) == 4, f"expected 4 demos, got {len(demos)}"
+        for label, batches in demos:
+            results = svc.forecast_series(batches, horizon=30)
+            assert results, f"{label}: no forecast results"
+            features = compute_forecast_features(batches, results)
+            assert features.trend_label is not None
+    except Exception as e:
+        import traceback
+        errors.append(f"Forecast smoke test: {e}\n{traceback.format_exc()}")
 
     if errors:
         print("Smoke test FAILED:")
@@ -1076,6 +1131,16 @@ def main():
     exp_codex_p = subparsers.add_parser("experiment-codex-task", help="Generate Codex task for experiment")
     exp_codex_p.add_argument("--id", type=int, required=True, help="Experiment ID")
 
+    forecast_p = subparsers.add_parser("forecast", help="Trend forecast layer")
+    forecast_sub = forecast_p.add_subparsers(dest="forecast_command")
+    f_demo = forecast_sub.add_parser("demo", help="Run demo with fixture data")
+    f_demo.add_argument("--horizon", type=int, default=30, help="Forecast horizon in days")
+    f_run = forecast_sub.add_parser("run", help="Forecast a specific entity metric")
+    f_run.add_argument("--entity-type", required=True)
+    f_run.add_argument("--entity-id", required=True)
+    f_run.add_argument("--metric", required=True)
+    f_run.add_argument("--horizon", type=int, default=30)
+
     args = parser.parse_args()
 
     init_db()
@@ -1112,6 +1177,19 @@ def main():
         cmd_experiment_dashboard(args)
     elif args.command == "experiment-codex-task":
         cmd_experiment_codex_task(args)
+    elif args.command == "forecast":
+        from src.forecast.cli import run_forecast_demo, run_forecast_for_entity
+        if args.forecast_command == "demo":
+            run_forecast_demo(horizon=args.horizon)
+        elif args.forecast_command == "run":
+            run_forecast_for_entity(
+                entity_type=args.entity_type,
+                entity_id=args.entity_id,
+                metric=args.metric,
+                horizon=args.horizon,
+            )
+        else:
+            print("Usage: python app.py forecast {demo|run} ...")
     else:
         parser.print_help()
 

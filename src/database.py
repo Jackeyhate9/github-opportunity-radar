@@ -240,6 +240,8 @@ def init_db():
     _add_llm_columns(conn)
     conn.commit()
     conn.close()
+    from src.forecast.database import init_forecast_tables
+    init_forecast_tables()
 
 
 def _add_score_columns(conn):
@@ -262,6 +264,7 @@ def _add_score_columns(conn):
         "ranking_flags_json TEXT",
         "ranking_warning TEXT",
         "suggested_next_action TEXT",
+        "forecast_signal_score REAL DEFAULT 50.0",
     ]
     for col_def in new_cols:
         col_name = col_def.split()[0]

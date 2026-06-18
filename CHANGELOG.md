@@ -1,10 +1,22 @@
 # Changelog
 
-## v0.5 (current)
-- WindowsPath crash fix: `str()` conversion for file output paths
-- `view_repo_detail` signature fix: removed `df` parameter, uses `SelectData.index[0]` directly
-- Auto-open browser on `python app.py web`
-- All Gradio startup warnings eliminated
+## v0.5 — Forecast Layer (current)
+- New `src/forecast/` pluggable forecast package (9 files)
+- `ForecastAdapter` abstract base class with `fit_or_prepare()` / `forecast()` / `detect_anomaly()` / `explain_forecast()`
+- `BaselineForecastAdapter`: naive last-value / moving-average / exponential-smoothing (no deps, always works)
+- `TimesFMAdapter`: lazy-load TimesFM, `ENABLE_TIMESFM=true` to activate, auto-fallback to baseline on failure
+- `historical_metrics` + `metric_forecasts` SQLite tables (migration-safe)
+- `ForecastService` orchestration: store metrics → run adapter → save forecasts
+- `compute_forecast_features()` → `ForecastFeatures` (growth 7/14/30d, acceleration, volatility, trend_label, explanation)
+- `compute_forecast_signal()` → `forecast_signal_score` (0-100, independent of existing scores)
+- 4 demo fixtures: spike+growth / steady+closing / flash-in-pan / insufficient-data
+- `python app.py forecast demo` — run demo with 4 scenarios
+- `python app.py forecast run --entity-type repo --entity-id owner/name --metric stars_count --horizon 30`
+- WebUI repo detail: Forecast panel with trend_label, confidence, signal score
+- Smoke-test covers: BaselineAdapter forecast, TimesFMAdapter fallback, DB tables, demo fixture prediction
+- WindowsPath crash fix: `str()` conversion for file output paths (v0.5.1)
+- `view_repo_detail` signature fix: removed `df` parameter, uses `SelectData.index[0]` directly (v0.5.1)
+- Auto-open browser on `python app.py web` (v0.5.1)
 
 ## v0.4 — Experiment Tracker
 - `experiment-create` / `experiment-list` / `experiment-update` / `experiment-report` / `experiment-dashboard`

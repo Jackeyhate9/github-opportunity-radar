@@ -619,6 +619,76 @@ def view_repo_detail(evt: gr.SelectData | None = None):
     lines.append("")
     lines.append(_score_bar("总分", repo.get("opportunity_score", 0), 100, "#4f46e5"))
     lines.append("")
+
+    # Forecast panel
+    lines.append("## 趋势预测 (v0.5 Forecast Layer)")
+    lines.append("")
+    repo_name = repo.get("full_name", "")
+    import os as _os
+    from src.forecast.models import SeriesBatch
+    from src.forecast.features import compute_forecast_features, compute_forecast_signal
+    from src.forecast.database import get_historical_metrics, get_latest_forecasts
+    import sqlite3 as _sqlite3
+
+    _enable_tfm = _os.environ.get("ENABLE_TIMESFM", "").lower() in ("true", "1", "yes")
+    if _enable_tfm:
+        from src.forecast.timesfm_adapter import TimesFMAdapter
+        _adapter = TimesFMAdapter()
+        _adapter_name_display = "TimesFM"
+    else:
+        from src.forecast.baseline import BaselineForecastAdapter
+        _adapter = BaselineForecastAdapter()
+        _adapter_name_display = "Baseline"
+
+    _conn_f = _sqlite3.connect(str(Path(__file__).parent.parent / "data" / "radar.sqlite"))
+    _conn_f.row_factory = _sqlite3.Row
+    _ts, _vs = get_historical_metrics(_conn_f, "repo", repo_name, "stars_count", limit=60)
+    if _ts:
+        _batch = SeriesBatch("repo", repo_name, "stars_count", _ts, _vs)
+        _fresults = _adapter.forecast([_batch], horizon=30)
+        _features = compute_forecast_features([_batch], _fresults)
+        _signal = compute_forecast_signal(_features)
+
+        _label_cn = {
+            "heating_up": "🔥 热度上升",
+            "cooling_down": "❄ 热度下降",
+            "stable": "✅ 稳定",
+            "noisy": "⚠ 波动较大",
+            "insufficient_data": "📭 数据不足",
+        }
+
+        def _sparkline(vals, width=20):
+            if not vals:
+                return ""
+            mn, mx = min(vals), max(vals)
+            rng = mx - mn if mx != mn else 1
+            blocks = "▁▂▃▄▅▆▇█"
+            step = len(vals) / max(width, 1)
+            sampled = [vals[int(i * step)] for i in range(min(width, len(vals)))]
+            bars = [blocks[min(int((v - mn) / rng * (len(blocks) - 1)), len(blocks) - 1)] for v in sampled]
+            return "`" + "".join(bars) + "`"
+
+        _adapter_tag = "🤖 TimesFM" if _enable_tfm else "📐 Baseline"
+        if _fresults and _fresults[0].was_fallback:
+            _adapter_tag += " → Baseline (降级)"
+        hist_spark = _sparkline(_vs)
+        fc_spark = _sparkline(_fresults[0].point_forecast[:14]) if _fresults else ""
+        lines.append(f'**趋势标签**：{_label_cn.get(_features.trend_label.value, _features.trend_label.value)}')
+        lines.append(f'**预测置信度**：{int(_features.forecast_confidence * 100)}%')
+        lines.append(f'**预测增速**：7d={_features.forecast_growth_7d:+.1f}% | 14d={_features.forecast_growth_14d:+.1f}% | 30d={_features.forecast_growth_30d:+.1f}%')
+        if _features.forecast_acceleration != 0:
+            lines.append(f'**加速度**：{_features.forecast_acceleration:+.2f}')
+        lines.append(f'**Signal Score**：{_signal.forecast_signal_score:.0f}/100')
+        lines.append(f'**模型**：{_adapter_tag}')
+        if hist_spark:
+            lines.append(f'**历史趋势**：{hist_spark}')
+        if fc_spark:
+            lines.append(f'**预测趋势(14d)**：{fc_spark}')
+        lines.append(f'**说明**：{_features.explanation}')
+    else:
+        lines.append("暂无可用的历史 Stars 数据。运行扫描积累数据后，趋势预测将自动生效。")
+    _conn_f.close()
+    lines.append("")
     lines.append("---")
     lines.append("")
 

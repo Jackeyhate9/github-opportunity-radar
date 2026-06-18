@@ -456,6 +456,17 @@ github-opportunity-radar/
 │   ├── validation_pack.py   # 创业验证包生成器 (v0.3)
 │   ├── webui.py             # Gradio 中文界面
 │   ├── config.py            # 配置项
+│   └── forecast/            # 趋势预测层 (v0.5)
+│       ├── __init__.py
+│       ├── adapter.py           # ForecastAdapter 抽象基类
+│       ├── baseline.py          # BaselineForecastAdapter (默认可用)
+│       ├── timesfm_adapter.py   # TimesFMAdapter (可选)
+│       ├── models.py            # 数据模型
+│       ├── features.py          # 衍生特征 + Signal Score
+│       ├── service.py           # 编排服务
+│       ├── database.py          # historical_metrics + metric_forecasts 表
+│       ├── demo_fixture.py      # 4 组演示数据
+│       └── cli.py               # CLI 入口
 │   └── llm/                 # LLM 增强分析层
 │       ├── base.py          # LLMConfig + LLMClient 抽象 + chat_json()
 │       ├── provider_router.py # 客户端工厂 (v0.2.2 新增)
@@ -555,16 +566,77 @@ python app.py scan --keywords "ollama,mcp,comfyui,gradio" --target 15 --min-star
 python app.py smoke-test
 ```
 
-`smoke-test` 执行 7 项代码健康检查：
-1. 所有核心模块 import
-2. 数据库初始化 + 8 表检查
+`smoke-test` 执行代码健康检查：
+1. 所有核心模块 import（含 forecast v0.5 模块）
+2. 数据库初始化 + 所有表检查（含 historical_metrics / metric_forecasts）
 3. 评分引擎对最小 repo dict 评分
 4. ranking_diagnostics 返回 flags
 5. 报告导出器生成临时 CSV/JSON/MD
 6. Watchlist DB 函数（add/load/remove）
 7. scores 表 watchlist 表新增列检查
+8. BaselineForecastAdapter 预测 14 天并验证输出
+9. TimesFMAdapter 未安装时自动 fallback
+10. demo fixture 生成 4 组数据并预测
 
 不需要网络，不修改扫描数据。输出 "Smoke test passed." 表示全部正常。
+
+## v0.5: Forecast Layer — 趋势预测
+
+> 新增可插拔趋势预测层，基于历史指标预测未来走势，不替代现有评分。
+
+### 运行 Demo
+
+```bash
+python app.py forecast demo --horizon 30
+```
+
+内置 4 个 demo 场景：
+- 快速爆红 + Issue 激增
+- 稳定增长 + Issue 关闭良好
+- 突然爆红后快速回落
+- 数据不足
+
+### CLI 命令
+
+```bash
+python app.py forecast demo                    # 运行演示数据
+python app.py forecast run --entity-type repo \
+  --entity-id owner/name --metric stars_count \
+  --horizon 30                                 # 对已有数据预测
+```
+
+### 使用 TimesFM（可选）
+
+```bash
+# 1. 安装依赖
+pip install timesfm torch
+
+# 2. 设置环境变量启用
+set ENABLE_TIMESFM=true
+
+# 3. 运行 demo（自动使用 TimesFM）
+python app.py forecast demo
+```
+
+如果 TimesFM 未安装、ENABLE_TIMESFM 未设置、或模型加载失败，系统自动降级到 BaselineForecastAdapter。smoke-test 不受影响。
+
+### WebUI 面板
+
+在 repo 详情页底部新增 **趋势预测** 面板，展示：
+- 趋势标签：heating_up / cooling_down / stable / noisy
+- 7/14/30 天预测增速
+- 预测置信度
+- Signal Score (0-100)
+- 异常信号标记
+
+### Forecast Signal Score
+
+不修改原始 `opportunity_score`，新增独立 `forecast_signal_score` (0-100)：
+- 未来增长为正 → 加分
+- 增速加快 → 加分
+- 波动过大 → 降置信度
+- 数据不足 → 维持 50 分
+- 异常尖峰 → 标记但不直接高分
 
 ## 配置项
 
