@@ -1,3 +1,4 @@
+import os
 import sqlite3
 from datetime import datetime, timezone
 from src.config import settings
@@ -25,7 +26,9 @@ class ForecastService:
             self._conn.row_factory = sqlite3.Row
         return self._conn
 
-    def get_adapter(self, prefer_timesfm: bool = False) -> ForecastAdapter:
+    def get_adapter(self, prefer_timesfm: bool | None = None) -> ForecastAdapter:
+        if prefer_timesfm is None:
+            prefer_timesfm = os.environ.get("ENABLE_TIMESFM", "").lower() in ("true", "1", "yes")
         if prefer_timesfm:
             self._timesfm.fit_or_prepare([])
             if self._timesfm._model is not None:
@@ -34,7 +37,7 @@ class ForecastService:
 
     def forecast_series(self, series_batch: list[SeriesBatch],
                          horizon: int = 30,
-                         prefer_timesfm: bool = False) -> list[ForecastResult]:
+                         prefer_timesfm: bool | None = None) -> list[ForecastResult]:
         adapter = self.get_adapter(prefer_timesfm)
         adapter.fit_or_prepare(series_batch)
         results = adapter.forecast(series_batch, horizon)

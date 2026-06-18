@@ -6,7 +6,7 @@ from src.forecast.baseline import BaselineForecastAdapter
 
 logger = logging.getLogger(__name__)
 
-HF_MODEL_ID = os.environ.get("TIMESFM_MODEL", "google/timesfm-2.0-500m-pytorch")
+HF_MODEL_ID = os.environ.get("TIMESFM_MODEL", "google/timesfm-2.5-200m-pytorch")
 
 
 class TimesFMAdapter(BaselineForecastAdapter):
@@ -28,7 +28,7 @@ class TimesFMAdapter(BaselineForecastAdapter):
             self._model = None
             return False
         try:
-            from timesfm import TimesFM_2p5_200M_torch
+            from timesfm import TimesFM_2p5_200M_torch, ForecastConfig
             import torch
             import numpy as np
         except ImportError as e:
@@ -36,9 +36,15 @@ class TimesFMAdapter(BaselineForecastAdapter):
             self._loaded = True
             return False
         try:
-            logger.info(f"正在从 HuggingFace Hub 加载 TimesFM 模型: {HF_MODEL_ID} (首次下载约需数分钟)...")
+            logger.info(f"正在加载 TimesFM 模型: {HF_MODEL_ID}")
             self._model = TimesFM_2p5_200M_torch.from_pretrained(HF_MODEL_ID)
-            self._model.compile()
+            cfg = ForecastConfig(
+                max_context=128,
+                max_horizon=64,
+                window_size=64,
+                normalize_inputs=True,
+            )
+            self._model.compile(cfg)
             logger.info("TimesFM 模型加载完成")
             self._loaded = True
             return True
